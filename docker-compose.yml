@@ -1,0 +1,116 @@
+# ============================================================
+# Cruise Ship ICS/SCADA Modbus TCP Pentest Lab
+# Authorized laboratory use only.
+#
+# Usage:
+#   docker compose build --no-cache
+#   docker compose up -d
+#
+# GUIs (open in Windows host browser):
+#   Controller  → http://localhost:8080
+#   Field Device → http://localhost:8081
+#
+# Kali shell:
+#   docker exec -it kali_pentest /bin/bash
+# ============================================================
+networks:
+  ics_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+    # Disable NAT masquerade — containers are isolated from the internet
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+
+services:
+
+  # ----------------------------------------------------------
+  # Field Device — Modbus TCP slave + web dashboard
+  # Simulates ship subsystems: engines, navigation, ballast
+  # ----------------------------------------------------------
+  field-device:
+    build:
+      context: ./docker/field-device
+      dockerfile: Dockerfile
+    container_name: field_device
+    hostname: field-device
+    networks:
+      ics_network:
+        ipv4_address: 172.20.0.20
+    ports:
+      - "502:502"       # Modbus TCP (optional direct host access)
+      - "8081:8081"     # Web dashboard → http://localhost:8081
+    environment:
+      - MODBUS_HOST=0.0.0.0
+      - MODBUS_PORT=502
+      - WEB_PORT=8081
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1',502)); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ----------------------------------------------------------
+  # Controller — Modbus TCP master + web command panel
+  # Simulates bridge/engine room automation controller
+  # ----------------------------------------------------------
+  controller:
+    build:
+      context: ./docker/controller
+      dockerfile: Dockerfile
+    container_name: controller
+    hostname: controller
+    networks:
+      ics_network:
+        ipv4_address: 172.20.0.10
+    ports:
+      - "8080:8080"     # Web dashboard → http://localhost:8080
+    environment:
+      - FIELD_DEVICE_HOST=172.20.0.20
+      - FIELD_DEVICE_PORT=502
+      - POLL_INTERVAL=5
+      - WRITE_INTERVAL=30
+      - WEB_PORT=8080
+    depends_on:
+      field-device:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ----------------------------------------------------------
+  # Kali — Pentest box with Modbuster mounted from source
+  # Needs NET_ADMIN + NET_RAW for Scapy live sniffing
+  # ----------------------------------------------------------
+  kali:
+    build:
+      context: ./docker/kali
+      dockerfile: Dockerfile
+    container_name: kali_pentest
+    hostname: kali
+    networks:
+      ics_network:
+        ipv4_address: 172.20.0.30
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      # Mount project root read-only — edit source on Windows host,
+      # changes are immediately visible inside the container.
+      - .:/opt/modbuster:ro
+      # Writable workspace for PCAP captures and exports
+      - kali_workspace:/workspace
+    environment:
+      - FIELD_DEVICE_HOST=172.20.0.20
+      - CONTROLLER_HOST=172.20.0.10
+    depends_on:
+      - field-device
+      - controller
+    stdin_open: true
+    tty: true
+    entrypoint: ["/entrypoint.sh"]
+    restart: unless-stopped
+
+volumes:
+  kali_workspace:

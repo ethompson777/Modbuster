@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Field Device — Cruise Ship ICS</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+  <style>
+    body { background: #0d1117; color: #c9d1d9; font-family: 'Courier New', monospace; }
+    .navbar { background: #161b22 !important; border-bottom: 1px solid #30363d; }
+    .card { background: #161b22; border: 1px solid #30363d; }
+    .card-header { background: #1c2128; border-bottom: 1px solid #30363d; }
+    .table { color: #c9d1d9; }
+    .table thead th { background: #1c2128; color: #58a6ff; border-color: #30363d; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    .table td, .table th { border-color: #21262d; vertical-align: middle; }
+    .table tbody tr:hover { background: #1c2128; }
+    .badge-unit1 { background: #1f6feb; }
+    .badge-unit2 { background: #388bfd; }
+    .badge-unit3 { background: #0d419d; }
+    .val-changed { animation: flash 0.6s ease-out; }
+    @keyframes flash { 0% { background: #d29922; } 100% { background: transparent; } }
+    .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; background: #3fb950; box-shadow: 0 0 6px #3fb950; }
+    .req-log { max-height: 320px; overflow-y: auto; font-size: 0.8rem; }
+    .req-log::-webkit-scrollbar { width: 6px; }
+    .req-log::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+    .fc-read { color: #58a6ff; }
+    .fc-write { color: #f85149; }
+    h5 { color: #58a6ff; }
+    .unit-label { color: #e3b341; font-weight: bold; }
+    #connection-status { font-size: 0.75rem; }
+  </style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark mb-4">
+  <div class="container-fluid">
+    <span class="navbar-brand mb-0 h1">⚓ Field Device — Cruise Ship ICS</span>
+    <span id="connection-status" class="text-muted">
+      <span class="status-dot" id="dot"></span> Connecting...
+    </span>
+  </div>
+</nav>
+
+<div class="container-fluid px-4">
+
+  <!-- Register panels row -->
+  <div class="row g-3 mb-4">
+
+    <!-- Unit 1 — Engine Room -->
+    <div class="col-xl-4 col-lg-12">
+      <div class="card h-100">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h5 class="mb-0">Unit 1 — Engine Room</h5>
+          <span class="badge badge-unit1">unit_id=1</span>
+        </div>
+        <div class="card-body p-0">
+          <table class="table table-sm table-hover mb-0" id="unit1-table">
+            <thead><tr><th>Addr</th><th>Register</th><th>Raw</th><th>Value</th></tr></thead>
+            <tbody id="unit1-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Unit 2 — Navigation -->
+    <div class="col-xl-4 col-lg-12">
+      <div class="card h-100">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h5 class="mb-0">Unit 2 — Navigation</h5>
+          <span class="badge badge-unit2">unit_id=2</span>
+        </div>
+        <div class="card-body p-0">
+          <table class="table table-sm table-hover mb-0" id="unit2-table">
+            <thead><tr><th>Addr</th><th>Register</th><th>Raw</th><th>Value</th></tr></thead>
+            <tbody id="unit2-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Unit 3 — Ballast -->
+    <div class="col-xl-4 col-lg-12">
+      <div class="card h-100">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h5 class="mb-0">Unit 3 — Ballast/Safety</h5>
+          <span class="badge badge-unit3">unit_id=3</span>
+        </div>
+        <div class="card-body p-0">
+          <table class="table table-sm table-hover mb-0" id="unit3-table">
+            <thead><tr><th>Addr</th><th>Register</th><th>Raw</th><th>Value</th></tr></thead>
+            <tbody id="unit3-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Incoming request log -->
+  <div class="row">
+    <div class="col-12">
+      <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h5 class="mb-0">Incoming Modbus Requests</h5>
+          <button class="btn btn-sm btn-outline-secondary" onclick="clearLog()">Clear</button>
+        </div>
+        <div class="card-body p-0">
+          <div class="req-log">
+            <table class="table table-sm mb-0" id="req-table">
+              <thead><tr>
+                <th>Time</th><th>Unit</th><th>Function</th><th>Addr</th><th>Count</th><th>Value</th>
+              </tr></thead>
+              <tbody id="req-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<script>
+  const socket = io();
+  let prevRegs = {1: {}, 2: {}, 3: {}};
+  let registerNames = {};
+
+  const unitBodies = {1: 'unit1-body', 2: 'unit2-body', 3: 'unit3-body'};
+
+  socket.on('connect', () => {
+    document.getElementById('dot').style.background = '#3fb950';
+    document.getElementById('connection-status').innerHTML =
+      '<span class="status-dot" id="dot"></span> Live';
+  });
+
+  socket.on('disconnect', () => {
+    document.getElementById('dot').style.background = '#f85149';
+    document.getElementById('connection-status').innerHTML =
+      '<span class="status-dot" id="dot" style="background:#f85149;box-shadow:0 0 6px #f85149"></span> Disconnected';
+  });
+
+  socket.on('registers', (data) => {
+    registerNames = data.names || {};
+    for (let unit = 1; unit <= 3; unit++) {
+      const regs = data.registers[unit] || [];
+      const scaled = (data.scaled || {})[unit] || {};
+      const names = registerNames[unit] || {};
+      const tbody = document.getElementById(unitBodies[unit]);
+
+      regs.forEach((raw, addr) => {
+        const rowId = `u${unit}a${addr}`;
+        let row = document.getElementById(rowId);
+        const name = names[addr] || `HR${addr}`;
+        const scaledVal = scaled[addr] || raw;
+
+        const changed = prevRegs[unit][addr] !== undefined && prevRegs[unit][addr] !== raw;
+
+        if (!row) {
+          row = document.createElement('tr');
+          row.id = rowId;
+          tbody.appendChild(row);
+        }
+
+        row.innerHTML = `
+          <td class="text-muted">${addr}</td>
+          <td>${name}</td>
+          <td id="${rowId}-raw" class="${changed ? 'val-changed' : ''}">${raw}</td>
+          <td id="${rowId}-scaled" class="${changed ? 'val-changed' : ''}">${scaledVal}</td>
+        `;
+
+        prevRegs[unit][addr] = raw;
+      });
+    }
+  });
+
+  socket.on('full_log', (data) => {
+    const entries = data.entries || [];
+    entries.reverse().forEach(entry => appendLogEntry(entry));
+  });
+
+  socket.on('request_log', (data) => {
+    appendLogEntry(data.entry);
+  });
+
+  function appendLogEntry(entry) {
+    const tbody = document.getElementById('req-body');
+    const isWrite = entry.fc && entry.fc.toLowerCase().includes('write');
+    const row = document.createElement('tr');
+    row.innerHTML = `
+      <td class="text-muted">${entry.ts}</td>
+      <td>${entry.unit}</td>
+      <td class="${isWrite ? 'fc-write' : 'fc-read'}">${entry.fc}</td>
+      <td>${entry.addr}</td>
+      <td>${entry.count || ''}</td>
+      <td>${entry.value !== undefined ? entry.value : ''}</td>
+    `;
+    tbody.insertBefore(row, tbody.firstChild);
+    // Keep max 50 rows
+    while (tbody.rows.length > 50) tbody.deleteRow(tbody.rows.length - 1);
+  }
+
+  function clearLog() {
+    document.getElementById('req-body').innerHTML = '';
+  }
+</script>
+</body>
+</html>
