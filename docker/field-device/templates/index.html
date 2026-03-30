@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Field Device — Royal Caribbean ICS</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+  <style>
+    :root, [data-bs-theme="dark"] {
+      --bs-body-bg: #0d1117;
+      --bs-body-color: #c9d1d9;
+      --bs-card-bg: #161b22;
+      --bs-card-border-color: #30363d;
+      --bs-table-bg: transparent;
+      --bs-table-color: #c9d1d9;
+      --bs-table-hover-bg: #1c2128;
+      --bs-table-border-color: #21262d;
+      --bs-border-color: #30363d;
+    }
+    body { background: #0d1117; color: #c9d1d9; font-family: 'Courier New', monospace; }
+    .navbar { background: #161b22 !important; border-bottom: 1px solid #30363d; }
+    .card { background: #161b22; border: 1px solid #30363d; }
+    .card-header { background: #1c2128; border-bottom: 1px solid #30363d; }
+    .table { color: #c9d1d9; }
+    .table thead th { background: #1c2128; color: #58a6ff; border-color: #30363d; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    .table td, .table th { border-color: #21262d; vertical-align: middle; }
+    .table tbody tr { background: transparent; }
+    .table tbody tr:hover { background: #1c2128; }
+    .table tbody td { background: transparent; color: #c9d1d9; }
+    .val-changed { animation: flash 0.6s ease-out; }
+    @keyframes flash { 0% { background: #d29922; } 100% { background: transparent; } }
+    .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; background: #3fb950; box-shadow: 0 0 6px #3fb950; }
+    #comms-banner { display: none; background: #da3633; color: #fff; font-weight: bold; text-align: center; padding: 10px; letter-spacing: 0.05em; animation: pulse-red 1.2s infinite; }
+    #comms-banner.ok { display: none; }
+    #comms-banner.lost { display: block; }
+    @keyframes pulse-red { 0%,100% { background: #da3633; } 50% { background: #ff6b6b; } }
+    .req-log { max-height: 320px; overflow-y: auto; font-size: 0.8rem; }
+    .req-log::-webkit-scrollbar { width: 6px; }
+    .req-log::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+    .fc-read { color: #58a6ff; }
+    .fc-write { color: #f85149; }
+    h5 { color: #58a6ff; }
+    .unit-badge { font-size: 0.7rem; padding: 3px 7px; border-radius: 4px; }
+    .u1 { background: #1f6feb; } .u2 { background: #388bfd; } .u3 { background: #0d419d; }
+    .u4 { background: #2ea043; } .u5 { background: #56d364; color: #0d1117; }
+    .u6 { background: #da3633; } .u7 { background: #d29922; color: #0d1117; }
+    .u8 { background: #8b949e; color: #0d1117; }
+    #connection-status { font-size: 0.75rem; }
+  </style>
+</head>
+<body>
+
+<div id="comms-banner">⚠ CONTROLLER COMMS LOST — No write received</div>
+
+<nav class="navbar navbar-dark mb-4">
+  <div class="container-fluid">
+    <span class="navbar-brand mb-0 h1" id="nav-title">⚓ Field Device — Royal Caribbean ICS</span>
+    <span id="connection-status" class="text-muted">
+      <span class="status-dot" id="dot"></span> Connecting...
+    </span>
+  </div>
+</nav>
+
+<div class="container-fluid px-4">
+
+  <!-- Unit cards injected here by JS -->
+  <div class="row g-3 mb-4" id="unit-grid"></div>
+
+  <!-- Incoming request log -->
+  <div class="row">
+    <div class="col-12">
+      <div class="card">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <h5 class="mb-0">Incoming Modbus Requests</h5>
+          <button class="btn btn-sm btn-outline-secondary" onclick="clearLog()">Clear</button>
+        </div>
+        <div class="card-body p-0">
+          <div class="req-log">
+            <table class="table table-sm mb-0" id="req-table">
+              <thead><tr>
+                <th>Time</th><th>Unit</th><th>Function</th><th>Addr</th><th>Count</th><th>Value</th>
+              </tr></thead>
+              <tbody id="req-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /container -->
+
+<script>
+  const UNIT_META = {
+    1: { title: 'Unit 1 — Main Propulsion',    badge: 'u1' },
+    2: { title: 'Unit 2 — Navigation/Bridge',  badge: 'u2' },
+    3: { title: 'Unit 3 — Ballast/Safety',     badge: 'u3' },
+    4: { title: 'Unit 4 — Power Management',   badge: 'u4' },
+    5: { title: 'Unit 5 — HVAC/Environmental', badge: 'u5' },
+    6: { title: 'Unit 6 — Fire Safety &amp; Alarms', badge: 'u6' },
+    7: { title: 'Unit 7 — Fuel Management',    badge: 'u7' },
+    8: { title: 'Unit 8 — Stabilizer/Motion',  badge: 'u8' },
+  };
+
+  const socket = io();
+  let prevRegs = {};
+  let registerNames = {};
+  let reqCount = 0;
+  let cardsBuilt = false;
+
+  function buildCards(activeUnits) {
+    if (cardsBuilt) return;
+    cardsBuilt = true;
+    const grid = document.getElementById('unit-grid');
+    activeUnits.forEach(unit => {
+      const meta = UNIT_META[unit] || { title: `Unit ${unit}`, badge: '' };
+      const col = document.createElement('div');
+      col.className = 'col-xl-4 col-lg-12';
+      col.id = `card-unit${unit}`;
+      col.innerHTML = `
+        <div class="card h-100">
+          <div class="card-header d-flex justify-content-between align-items-center">
+            <h5 class="mb-0">${meta.title}</h5>
+            <span class="unit-badge ${meta.badge}">unit_id=${unit}</span>
+          </div>
+          <div class="card-body p-0">
+            <table class="table table-sm table-hover mb-0">
+              <thead><tr><th>Addr</th><th>Register</th><th>Raw</th><th>Value</th></tr></thead>
+              <tbody id="unit${unit}-body"></tbody>
+            </table>
+          </div>
+        </div>`;
+      grid.appendChild(col);
+      prevRegs[unit] = {};
+    });
+    document.getElementById('nav-title').textContent =
+      `⚓ Field Device — Units ${activeUnits.join(', ')}`;
+  }
+
+  socket.on('connect', () => {
+    document.getElementById('dot').style.background = '#3fb950';
+    document.getElementById('connection-status').innerHTML =
+      '<span class="status-dot" id="dot"></span> Live';
+  });
+
+  socket.on('disconnect', () => {
+    document.getElementById('dot').style.background = '#f85149';
+    document.getElementById('connection-status').innerHTML =
+      '<span class="status-dot" id="dot" style="background:#f85149;box-shadow:0 0 6px #f85149"></span> Disconnected';
+  });
+
+  socket.on('comms_status', (data) => {
+    const banner = document.getElementById('comms-banner');
+    if (data.lost) {
+      const msg = data.seconds !== null
+        ? `⚠ CONTROLLER COMMS LOST — No write received for ${data.seconds}s`
+        : '⚠ CONTROLLER COMMS LOST — Waiting for controller';
+      banner.textContent = msg;
+      banner.className = 'lost';
+    } else {
+      banner.className = 'ok';
+    }
+  });
+
+  socket.on('registers', (data) => {
+    registerNames = data.names || {};
+    const activeUnits = Object.keys(registerNames).map(Number).sort((a,b) => a-b);
+    buildCards(activeUnits);
+
+    activeUnits.forEach(unit => {
+      const regs = (data.registers || {})[unit] || [];
+      const scaled = ((data.scaled || {})[unit]) || {};
+      const names = registerNames[unit] || {};
+      const tbody = document.getElementById(`unit${unit}-body`);
+      if (!tbody) return;
+
+      regs.forEach((raw, addr) => {
+        const rowId = `u${unit}a${addr}`;
+        let row = document.getElementById(rowId);
+        const name = names[addr] || `HR${addr}`;
+        const scaledVal = scaled[addr] !== undefined ? scaled[addr] : raw;
+        const changed = prevRegs[unit][addr] !== undefined && prevRegs[unit][addr] !== raw;
+
+        if (!row) {
+          row = document.createElement('tr');
+          row.id = rowId;
+          tbody.appendChild(row);
+        }
+        row.innerHTML = `
+          <td class="text-muted">${addr}</td>
+          <td>${name}</td>
+          <td class="${changed ? 'val-changed' : ''}">${raw}</td>
+          <td class="${changed ? 'val-changed' : ''}">${scaledVal}</td>`;
+        prevRegs[unit][addr] = raw;
+      });
+    });
+  });
+
+  socket.on('full_log', (data) => {
+    (data.entries || []).slice().reverse().forEach(e => appendLogEntry(e, false));
+  });
+
+  socket.on('request_log', (data) => {
+    appendLogEntry(data.entry, true);
+  });
+
+  function appendLogEntry(entry, updateStatus) {
+    if (updateStatus) reqCount++;
+    const tbody = document.getElementById('req-body');
+    const isWrite = entry.fc && entry.fc.toLowerCase().includes('write');
+    const row = document.createElement('tr');
+    row.innerHTML = `
+      <td class="text-muted">${entry.ts}</td>
+      <td>${entry.unit}</td>
+      <td class="${isWrite ? 'fc-write' : 'fc-read'}">${entry.fc}</td>
+      <td>${entry.addr}</td>
+      <td>${entry.count || ''}</td>
+      <td>${entry.value !== undefined ? entry.value : ''}</td>`;
+    tbody.insertBefore(row, tbody.firstChild);
+    while (tbody.rows.length > 100) tbody.deleteRow(tbody.rows.length - 1);
+  }
+
+  function clearLog() {
+    document.getElementById('req-body').innerHTML = '';
+    reqCount = 0;
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,160 @@
+# ============================================================
+# Cruise Ship ICS/SCADA Modbus TCP Pentest Lab
+# Authorized laboratory use only.
+#
+# Usage:
+#   docker compose build --no-cache
+#   docker compose up -d
+#   sudo bash setup_mirror.sh   # re-run after every 'docker compose up'
+#
+# GUIs (open in browser):
+#   Controller       → http://localhost:8080
+#   Field Device 1   → http://localhost:8082  (Units 1-4: Propulsion, Nav, Ballast, Power)
+#   Field Device 2   → http://localhost:8083  (Units 5-8: HVAC, Fire, Fuel, Stabilizer)
+#   Kali Desktop     → http://localhost:6080/vnc.html
+#
+# Kali shell:
+#   docker exec -it kali_pentest /bin/bash
+# ============================================================
+networks:
+  ics_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+    # Disable NAT masquerade — containers are isolated from the internet
+    driver_opts:
+      com.docker.network.bridge.enable_ip_masquerade: "false"
+
+services:
+
+  # ----------------------------------------------------------
+  # Field Device 1 — Units 1-4
+  # Main Propulsion, Navigation/Bridge, Ballast/Safety, Power
+  # ----------------------------------------------------------
+  field-device-1:
+    build:
+      context: ./docker/field-device
+      dockerfile: Dockerfile
+    container_name: field_device_1
+    hostname: field-device-1
+    networks:
+      ics_network:
+        ipv4_address: 172.20.0.20
+    ports:
+      - "502:502"       # Modbus TCP (optional direct host access)
+      - "8082:8081"     # Web dashboard → http://localhost:8082
+    environment:
+      - MODBUS_HOST=0.0.0.0
+      - MODBUS_PORT=502
+      - WEB_PORT=8081
+      - UNIT_IDS=1,2,3,4
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1',502)); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ----------------------------------------------------------
+  # Field Device 2 — Units 5-8
+  # HVAC/Environmental, Fire Safety, Fuel Management, Stabilizer
+  # ----------------------------------------------------------
+  field-device-2:
+    build:
+      context: ./docker/field-device
+      dockerfile: Dockerfile
+    container_name: field_device_2
+    hostname: field-device-2
+    networks:
+      ics_network:
+        ipv4_address: 172.20.0.21
+    ports:
+      - "503:502"       # Modbus TCP (optional direct host access)
+      - "8083:8081"     # Web dashboard → http://localhost:8083
+    environment:
+      - MODBUS_HOST=0.0.0.0
+      - MODBUS_PORT=502
+      - WEB_PORT=8081
+      - UNIT_IDS=5,6,7,8
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import socket; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1',502)); s.close()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ----------------------------------------------------------
+  # Controller — Modbus TCP master + web command panel
+  # Polls field-device-1 (propulsion/nav); bridge console writes there too
+  # ----------------------------------------------------------
+  controller:
+    build:
+      context: ./docker/controller
+      dockerfile: Dockerfile
+    container_name: controller
+    hostname: controller
+    networks:
+      ics_network:
+        ipv4_address: 172.20.0.10
+    ports:
+      - "8080:8080"     # Web dashboard → http://localhost:8080
+    environment:
+      - FIELD_DEVICE_HOST=172.20.0.20
+      - FIELD_DEVICE_PORT=502
+      - FIELD_DEVICE_2_HOST=172.20.0.21
+      - FIELD_DEVICE_2_PORT=502
+      - POLL_INTERVAL=5
+      - WRITE_INTERVAL=30
+      - WEB_PORT=8080
+    depends_on:
+      field-device-1:
+        condition: service_healthy
+      field-device-2:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ----------------------------------------------------------
+  # Kali — Pentest box with Modbuster mounted from source
+  # Needs NET_ADMIN + NET_RAW for Scapy live sniffing
+  # ----------------------------------------------------------
+  kali:
+    build:
+      context: ./docker/kali
+      dockerfile: Dockerfile
+    container_name: kali_pentest
+    hostname: kali
+    networks:
+      ics_network:
+        ipv4_address: 172.20.0.30
+    ports:
+      - "6080:6080"   # noVNC browser desktop → http://localhost:6080/vnc.html
+      - "5901:5901"   # Raw VNC (optional, for VNC client)
+    privileged: true
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      # Mount project root read-only — edit source on host,
+      # changes are immediately visible inside the container.
+      - .:/opt/modbuster:ro
+      # Writable workspace for PCAP captures and exports
+      # Bind-mounted so host can access captures/exports directly
+      - ./workspace:/workspace
+    environment:
+      - FIELD_DEVICE_HOST=172.20.0.20
+      - FIELD_DEVICE_2_HOST=172.20.0.21
+      - CONTROLLER_HOST=172.20.0.10
+    depends_on:
+      - field-device-1
+      - field-device-2
+      - controller
+    stdin_open: true
+    tty: true
+    entrypoint: ["/entrypoint.sh"]
+    command: ["/start_desktop.sh"]
+    restart: unless-stopped
+
+volumes: {}

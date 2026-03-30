@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Modbuster
+Comment=ICS/SCADA Pentest Tool
+Exec=bash -c "cd /opt/modbuster && python3 -m modbuster gui"
+Icon=/opt/modbuster/modbuster/icon.svg
+Terminal=false
+Categories=Security;

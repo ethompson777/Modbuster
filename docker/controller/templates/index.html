@@ -1,0 +1,932 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Controller — Royal Caribbean ICS</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"></script>
+  <style>
+    /* ── Bootstrap 5.3 dark-mode root overrides ── */
+    :root, [data-bs-theme="dark"] {
+      --bs-body-bg: #0d1117;
+      --bs-body-color: #c9d1d9;
+      --bs-card-bg: #161b22;
+      --bs-card-border-color: #30363d;
+      --bs-table-bg: transparent;
+      --bs-table-color: #c9d1d9;
+      --bs-table-hover-bg: #1c2128;
+      --bs-table-striped-bg: #161b22;
+      --bs-table-border-color: #21262d;
+      --bs-border-color: #30363d;
+      --bs-nav-tabs-border-color: #30363d;
+      --bs-nav-tabs-link-active-bg: #161b22;
+      --bs-nav-tabs-link-active-color: #58a6ff;
+      --bs-nav-tabs-link-active-border-color: #30363d #30363d #161b22;
+      --bs-nav-link-color: #8b949e;
+      --bs-nav-link-hover-color: #c9d1d9;
+      --bs-input-bg: #0d1117;
+      --bs-input-color: #c9d1d9;
+      --bs-input-border-color: #30363d;
+      --bs-input-focus-border-color: #58a6ff;
+      --bs-form-select-bg: #0d1117;
+    }
+    body { background: #0d1117; color: #c9d1d9; font-family: 'Courier New', monospace; }
+    .navbar { background: #161b22 !important; border-bottom: 1px solid #30363d; }
+    .card { background: #161b22; border: 1px solid #30363d; }
+    .card-header { background: #1c2128; border-bottom: 1px solid #30363d; }
+    .table { color: #c9d1d9; }
+    .table thead th { background: #1c2128; color: #58a6ff; border-color: #30363d; font-size: 0.75rem; text-transform: uppercase; }
+    .table td, .table th { border-color: #21262d; vertical-align: middle; }
+    .table tbody tr { background: transparent; }
+    .table tbody tr:hover { background: #1c2128; }
+    .table tbody td { background: transparent; color: #c9d1d9; }
+    .form-control, .form-select { background: #0d1117 !important; color: #c9d1d9 !important; border-color: #30363d !important; }
+    .form-control:focus, .form-select:focus { border-color: #58a6ff !important; box-shadow: none !important; }
+    .form-label { color: #8b949e; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+    .btn-primary { background: #1f6feb; border-color: #1f6feb; }
+    .btn-primary:hover { background: #388bfd; border-color: #388bfd; }
+    .btn-outline-secondary { color: #8b949e; border-color: #30363d; }
+    .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; background: #3fb950; box-shadow: 0 0 6px #3fb950; }
+    .log-panel { max-height: 280px; overflow-y: auto; font-size: 0.78rem; }
+    .log-panel::-webkit-scrollbar { width: 6px; }
+    .log-panel::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+    .result-ok { color: #3fb950; } .result-err { color: #f85149; }
+    .type-write { color: #f85149; } .type-read { color: #58a6ff; }
+    h5 { color: #58a6ff; }
+    .val-changed { animation: flash 0.6s ease-out; }
+    @keyframes flash { 0% { background: #d29922; } 100% { background: transparent; } }
+    #response-box { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 12px; min-height: 50px; font-size: 0.85rem; }
+    #response-box.ok { border-color: #3fb950; color: #3fb950; }
+    #response-box.err { border-color: #f85149; color: #f85149; }
+    .unit-badge { font-size: 0.7rem; padding: 2px 6px; border-radius: 4px; }
+    .u1{background:#1f6feb} .u2{background:#388bfd} .u3{background:#0d419d}
+    .u4{background:#2ea043} .u5{background:#56d364;color:#0d1117}
+    .u6{background:#da3633} .u7{background:#d29922;color:#0d1117}
+    .u8{background:#8b949e;color:#0d1117}
+    .ref { font-size: 0.72rem; color: #8b949e; line-height: 1.5; }
+    .ref strong { color: #e3b341; }
+
+    /* ── Bridge Control Console ─────────────────────────────── */
+    .bridge-card { background: #0d1117; border: 1px solid #30363d; border-radius: 8px; }
+    .bridge-label { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.12em; color: #8b949e; }
+    .bridge-title { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.15em; color: #58a6ff; margin-bottom: 2px; }
+    .telegraph-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .telegraph-svg-wrap { position: relative; }
+    .telegraph-svg-wrap svg { cursor: ns-resize; user-select: none; }
+    .tele-pct { font-size: 1.05rem; font-family: 'Courier New', monospace; color: #58a6ff; text-align: center; min-width: 54px; }
+    .tele-zone-label { font-size: 0.55rem; letter-spacing: 0.06em; color: #8b949e; text-align: right; padding-right: 3px; line-height: 1.1; }
+    .nav-box { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 10px 14px; min-width: 90px; }
+    .nav-val { font-size: 1.45rem; font-family: 'Courier New', monospace; color: #3fb950; line-height: 1.1; }
+    .nav-unit { font-size: 0.6rem; color: #8b949e; }
+    .rudder-val { font-size: 1.05rem; font-family: 'Courier New', monospace; text-align: center; }
+    .sync-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .write-badge { font-size: 0.62rem; background: #da3633; color: #fff; border-radius: 3px; padding: 1px 5px; }
+    .ctrl-lock { cursor: pointer; font-size: 0.72rem; }
+  </style>
+</head>
+<body>
+
+<nav class="navbar navbar-dark mb-4">
+  <div class="container-fluid">
+    <span class="navbar-brand mb-0 h1">🎛️ Controller — Royal Caribbean ICS (8 Subsystems)</span>
+    <span id="conn-status" style="font-size:0.75rem" class="text-muted">
+      <span class="status-dot" id="dot"></span> Connecting...
+    </span>
+  </div>
+</nav>
+
+<div class="container-fluid px-4">
+
+<!-- ═══════════════════════  BRIDGE CONTROL CONSOLE  ═══════════════════════ -->
+<div class="row g-3 mb-2">
+<div class="col-12">
+<div class="card bridge-card">
+  <div class="card-header d-flex align-items-center gap-3" style="background:#0d1117;border-bottom:1px solid #30363d">
+    <h5 class="mb-0" style="letter-spacing:0.12em">⚓ BRIDGE CONTROL CONSOLE</h5>
+    <span class="bridge-label ms-2">Royal Caribbean · Oasis-class</span>
+    <span id="ctrl-lock-badge" class="write-badge ms-auto" style="background:#2ea043">🔓 WRITE ENABLED</span>
+  </div>
+  <div class="card-body py-3">
+    <div class="row align-items-center g-3">
+
+      <!-- PORT ENGINE TELEGRAPH -->
+      <div class="col-auto">
+        <div class="telegraph-wrap">
+          <div style="height:34px;display:flex;align-items:center;justify-content:center">
+            <div class="bridge-title">PORT ENGINE</div>
+          </div>
+          <div class="telegraph-svg-wrap">
+            <svg id="tele-port-svg" width="80" height="200" viewBox="0 0 80 200">
+              <!-- Track -->
+              <rect x="30" y="8" width="20" height="184" rx="4" fill="#111" stroke="#30363d" stroke-width="1"/>
+              <!-- Zones -->
+              <rect x="31" y="9"   width="18" height="37" rx="2" fill="#0a3a0a"/>
+              <rect x="31" y="46"  width="18" height="37" rx="2" fill="#0a2a0a"/>
+              <rect x="31" y="83"  width="18" height="37" rx="2" fill="#1a2a08"/>
+              <rect x="31" y="120" width="18" height="36" rx="2" fill="#2a1a08"/>
+              <rect x="31" y="156" width="18" height="36" rx="2" fill="#2a0a0a"/>
+              <!-- Zone dividers -->
+              <line x1="28" y1="46"  x2="52" y2="46"  stroke="#30363d" stroke-width="0.5"/>
+              <line x1="28" y1="83"  x2="52" y2="83"  stroke="#30363d" stroke-width="0.5"/>
+              <line x1="28" y1="120" x2="52" y2="120" stroke="#30363d" stroke-width="0.5"/>
+              <line x1="28" y1="156" x2="52" y2="156" stroke="#30363d" stroke-width="0.5"/>
+              <!-- Zone labels (left of track) -->
+              <text x="27" y="30"  text-anchor="end" fill="#3fb950" font-size="6" font-family="Courier New">FULL</text>
+              <text x="27" y="38"  text-anchor="end" fill="#3fb950" font-size="6" font-family="Courier New">AHD</text>
+              <text x="27" y="67"  text-anchor="end" fill="#56d364" font-size="6" font-family="Courier New">HALF</text>
+              <text x="27" y="75"  text-anchor="end" fill="#56d364" font-size="6" font-family="Courier New">AHD</text>
+              <text x="27" y="103" text-anchor="end" fill="#d29922" font-size="6" font-family="Courier New">SLOW</text>
+              <text x="27" y="111" text-anchor="end" fill="#d29922" font-size="6" font-family="Courier New">AHD</text>
+              <text x="27" y="140" text-anchor="end" fill="#e3b341" font-size="6" font-family="Courier New">DEAD</text>
+              <text x="27" y="148" text-anchor="end" fill="#e3b341" font-size="6" font-family="Courier New">SLW</text>
+              <text x="27" y="176" text-anchor="end" fill="#f85149" font-size="7" font-family="Courier New">STOP</text>
+              <!-- Lever handle (moves) -->
+              <line id="port-lever-line" x1="40" y1="9" x2="40" y2="30" stroke="#58a6ff" stroke-width="3" stroke-linecap="round" opacity="0.5"/>
+              <circle id="port-indicator" cx="40" cy="30" r="9" fill="#58a6ff" stroke="#c9d1d9" stroke-width="1.5"/>
+              <text id="port-pct-svg" x="40" y="34" text-anchor="middle" fill="#fff" font-size="7" font-family="Courier New" font-weight="bold">75</text>
+            </svg>
+          </div>
+          <div class="tele-pct" id="port-pct-disp">75.0 RPM</div>
+        </div>
+      </div>
+
+      <!-- ALL ENGINES (SYNC) TELEGRAPH -->
+      <div class="col-auto">
+        <div class="telegraph-wrap">
+          <div style="height:34px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px">
+            <div class="bridge-title" style="font-size:0.55rem;letter-spacing:0.1em;margin-bottom:0">ALL ENG</div>
+            <div class="bridge-title" style="font-size:0.55rem;color:#d29922;margin-bottom:0">SYNC</div>
+          </div>
+          <div class="telegraph-svg-wrap">
+            <svg id="tele-sync-svg" width="80" height="200" viewBox="0 0 80 200">
+              <rect x="30" y="8" width="20" height="184" rx="4" fill="#111" stroke="#30363d" stroke-width="1"/>
+              <rect x="31" y="9"   width="18" height="37" rx="2" fill="#0a3a0a"/>
+              <rect x="31" y="46"  width="18" height="37" rx="2" fill="#0a2a0a"/>
+              <rect x="31" y="83"  width="18" height="37" rx="2" fill="#1a2a08"/>
+              <rect x="31" y="120" width="18" height="36" rx="2" fill="#2a1a08"/>
+              <rect x="31" y="156" width="18" height="36" rx="2" fill="#2a0a0a"/>
+              <line x1="28" y1="46"  x2="52" y2="46"  stroke="#30363d" stroke-width="0.5"/>
+              <line x1="28" y1="83"  x2="52" y2="83"  stroke="#30363d" stroke-width="0.5"/>
+              <line x1="28" y1="120" x2="52" y2="120" stroke="#30363d" stroke-width="0.5"/>
+              <line x1="28" y1="156" x2="52" y2="156" stroke="#30363d" stroke-width="0.5"/>
+              <line id="sync-lever-line" x1="40" y1="9" x2="40" y2="30" stroke="#d29922" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+              <circle id="sync-indicator" cx="40" cy="30" r="9" fill="#d29922" stroke="#c9d1d9" stroke-width="1.5"/>
+              <text id="sync-pct-svg" x="40" y="34" text-anchor="middle" fill="#fff" font-size="7" font-family="Courier New" font-weight="bold">75</text>
+            </svg>
+          </div>
+          <div class="tele-pct" id="sync-pct-disp" style="color:#d29922">75%</div>
+        </div>
+      </div>
+
+      <!-- STBD ENGINE TELEGRAPH -->
+      <div class="col-auto">
+        <div class="telegraph-wrap">
+          <div style="height:34px;display:flex;align-items:center;justify-content:center">
+            <div class="bridge-title">STBD ENGINE</div>
+          </div>
+          <div class="telegraph-svg-wrap">
+            <svg id="tele-stbd-svg" width="80" height="200" viewBox="0 0 80 200">
+              <rect x="30" y="8" width="20" height="184" rx="4" fill="#111" stroke="#30363d" stroke-width="1"/>
+              <rect x="31" y="9"   width="18" height="37" rx="2" fill="#0a3a0a"/>
+              <rect x="31" y="46"  width="18" height="37" rx="2" fill="#0a2a0a"/>
+              <rect x="31" y="83"  width="18" height="37" rx="2" fill="#1a2a08"/>
+              <rect x="31" y="120" width="18" height="36" rx="2" fill="#2a1a08"/>
+              <rect x="31" y="156" width="18" height="36" rx="2" fill="#2a0a0a"/>
+              <line x1="28" y1="46"  x2="52" y2="46"  stroke="#30363d" stroke-width="0.5"/>
+              <line x1="28" y1="83"  x2="52" y2="83"  stroke="#30363d" stroke-width="0.5"/>
+              <line x1="28" y1="120" x2="52" y2="120" stroke="#30363d" stroke-width="0.5"/>
+              <line x1="28" y1="156" x2="52" y2="156" stroke="#30363d" stroke-width="0.5"/>
+              <text x="53" y="30"  text-anchor="start" fill="#3fb950" font-size="6" font-family="Courier New">FULL</text>
+              <text x="53" y="38"  text-anchor="start" fill="#3fb950" font-size="6" font-family="Courier New">AHD</text>
+              <text x="53" y="67"  text-anchor="start" fill="#56d364" font-size="6" font-family="Courier New">HALF</text>
+              <text x="53" y="75"  text-anchor="start" fill="#56d364" font-size="6" font-family="Courier New">AHD</text>
+              <text x="53" y="103" text-anchor="start" fill="#d29922" font-size="6" font-family="Courier New">SLOW</text>
+              <text x="53" y="111" text-anchor="start" fill="#d29922" font-size="6" font-family="Courier New">AHD</text>
+              <text x="53" y="140" text-anchor="start" fill="#e3b341" font-size="6" font-family="Courier New">DEAD</text>
+              <text x="53" y="148" text-anchor="start" fill="#e3b341" font-size="6" font-family="Courier New">SLW</text>
+              <text x="53" y="176" text-anchor="start" fill="#f85149" font-size="7" font-family="Courier New">STOP</text>
+              <line id="stbd-lever-line" x1="40" y1="9" x2="40" y2="30" stroke="#58a6ff" stroke-width="3" stroke-linecap="round" opacity="0.5"/>
+              <circle id="stbd-indicator" cx="40" cy="30" r="9" fill="#58a6ff" stroke="#c9d1d9" stroke-width="1.5"/>
+              <text id="stbd-pct-svg" x="40" y="34" text-anchor="middle" fill="#fff" font-size="7" font-family="Courier New" font-weight="bold">75</text>
+            </svg>
+          </div>
+          <div class="tele-pct" id="stbd-pct-disp">75.0 RPM</div>
+        </div>
+      </div>
+
+      <!-- RUDDER CONTROLS -->
+      <div class="col">
+        <div class="d-flex flex-column align-items-center gap-3">
+
+          <!-- Rudder Indicator -->
+          <div style="background:#161b22;border:1px solid #30363d;border-radius:6px;padding:10px 12px;width:100%">
+            <div class="bridge-title text-center">RUDDER ANGLE</div>
+            <svg width="100%" height="90" viewBox="0 0 220 95">
+              <!-- Arc background -->
+              <path d="M 15 85 A 95 95 0 0 1 205 85" fill="none" stroke="#1c2128" stroke-width="18"/>
+              <!-- Port zone (left) -->
+              <path d="M 15 85 A 95 95 0 0 1 68 24" fill="none" stroke="#1a0a0a" stroke-width="18"/>
+              <!-- Stbd zone (right) -->
+              <path d="M 152 24 A 95 95 0 0 1 205 85" fill="none" stroke="#0a1a0a" stroke-width="18"/>
+              <!-- Scale ticks -->
+              <line x1="15" y1="85" x2="22" y2="85" stroke="#30363d" stroke-width="1.5"/>
+              <line x1="205" y1="85" x2="198" y2="85" stroke="#30363d" stroke-width="1.5"/>
+              <line x1="110" y1="85" x2="110" y2="75" stroke="#30363d" stroke-width="1.5"/>
+              <!-- Labels -->
+              <text x="6"   y="98" fill="#f85149" font-size="8" font-family="Courier New">35P</text>
+              <text x="185" y="98" fill="#3fb950" font-size="8" font-family="Courier New">35S</text>
+              <text x="98"  y="98" fill="#8b949e" font-size="8" font-family="Courier New">0°</text>
+              <text x="30"  y="72" fill="#8b949e" font-size="7" font-family="Courier New">PORT</text>
+              <text x="160" y="72" fill="#8b949e" font-size="7" font-family="Courier New">STBD</text>
+              <!-- Needle (rotates around cx=110 cy=85) -->
+              <line id="rudder-needle" x1="110" y1="85" x2="110" y2="0" stroke="#58a6ff" stroke-width="2.5" stroke-linecap="round"
+                    transform="rotate(0, 110, 85)"/>
+              <circle cx="110" cy="85" r="5" fill="#58a6ff"/>
+            </svg>
+            <div class="rudder-val text-center" id="rudder-disp" style="color:#58a6ff">0° Amidships</div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- NAV READOUTS -->
+      <div class="col-auto">
+        <div class="d-flex flex-column gap-2">
+          <div class="nav-box">
+            <div class="bridge-label">Speed</div>
+            <div class="nav-val" id="nav-speed">—</div>
+            <div class="nav-unit">knots</div>
+          </div>
+          <div class="nav-box">
+            <div class="bridge-label">Heading</div>
+            <div class="nav-val" id="nav-heading">—</div>
+            <div class="nav-unit">° True</div>
+          </div>
+          <div class="nav-box">
+            <div class="bridge-label">Rate of Turn</div>
+            <div class="nav-val" id="nav-rot" style="font-size:1.1rem">—</div>
+            <div class="nav-unit">°/min</div>
+          </div>
+          <div class="nav-box">
+            <div class="bridge-label">Port RPM (act)</div>
+            <div class="nav-val" id="nav-port-rpm" style="color:#56d364">—</div>
+            <div class="nav-unit">rpm</div>
+          </div>
+          <div class="nav-box">
+            <div class="bridge-label">Stbd RPM (act)</div>
+            <div class="nav-val" id="nav-stbd-rpm" style="color:#56d364">—</div>
+            <div class="nav-unit">rpm</div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /row -->
+  </div><!-- /card-body -->
+</div><!-- /card -->
+</div><!-- /col-12 -->
+</div><!-- /bridge row -->
+
+<div class="row g-3">
+
+  <!-- LEFT: Manual command panel + reference -->
+  <div class="col-xl-3 col-lg-5">
+    <div class="card">
+      <div class="card-header"><h5 class="mb-0">Manual Command</h5></div>
+      <div class="card-body">
+        <form id="cmd-form">
+          <div class="mb-3">
+            <label class="form-label">Function</label>
+            <select class="form-select" id="fc" onchange="updateForm()">
+              <option value="read_holding">Read Holding Registers (FC3)</option>
+              <option value="read_coils">Read Coils (FC1)</option>
+              <option value="write_single">Write Single Register (FC6)</option>
+              <option value="write_multiple">Write Multiple Registers (FC16)</option>
+            </select>
+          </div>
+          <div class="row mb-3">
+            <div class="col-5">
+              <label class="form-label">Unit ID</label>
+              <select class="form-select" id="unit">
+                <option value="1">1 — Propulsion</option>
+                <option value="2">2 — Navigation</option>
+                <option value="3">3 — Ballast</option>
+                <option value="4">4 — Power</option>
+                <option value="5">5 — HVAC</option>
+                <option value="6">6 — Fire Safety</option>
+                <option value="7">7 — Fuel</option>
+                <option value="8">8 — Stabilizers</option>
+              </select>
+            </div>
+            <div class="col-4">
+              <label class="form-label">Start Addr</label>
+              <input type="number" class="form-control" id="addr" value="0" min="0" max="99">
+            </div>
+            <div class="col-3" id="count-group">
+              <label class="form-label">Count</label>
+              <input type="number" class="form-control" id="count" value="10" min="1" max="100">
+            </div>
+          </div>
+          <div class="mb-3" id="value-group" style="display:none">
+            <label class="form-label" id="value-label">Value</label>
+            <input type="text" class="form-control" id="value" placeholder="e.g. 195">
+            <div class="form-text text-muted" id="value-hint"></div>
+          </div>
+          <button type="submit" class="btn btn-primary w-100">Send Command</button>
+        </form>
+        <div class="mt-3">
+          <div class="form-label mb-1">Response</div>
+          <div id="response-box">—</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- MIDDLE: Live register snapshot (all 8 units, tabbed) -->
+  <div class="col-xl-6 col-lg-7">
+    <div class="card">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">Live Register Snapshot</h5>
+        <span id="last-poll" class="text-muted" style="font-size:0.75rem">—</span>
+      </div>
+      <div class="card-body p-0">
+        <!-- Unit tabs -->
+        <ul class="nav nav-tabs px-2 pt-2" id="unitTabs" style="border-color:#30363d">
+          <li class="nav-item"><a class="nav-link active" data-unit="1" href="#" onclick="showUnit(1,this)">1:Propulsion</a></li>
+          <li class="nav-item"><a class="nav-link" data-unit="2" href="#" onclick="showUnit(2,this)">2:Nav</a></li>
+          <li class="nav-item"><a class="nav-link" data-unit="3" href="#" onclick="showUnit(3,this)">3:Ballast</a></li>
+          <li class="nav-item"><a class="nav-link" data-unit="4" href="#" onclick="showUnit(4,this)">4:Power</a></li>
+          <li class="nav-item"><a class="nav-link" data-unit="5" href="#" onclick="showUnit(5,this)">5:HVAC</a></li>
+          <li class="nav-item"><a class="nav-link" data-unit="6" href="#" onclick="showUnit(6,this)">6:Fire</a></li>
+          <li class="nav-item"><a class="nav-link" data-unit="7" href="#" onclick="showUnit(7,this)">7:Fuel</a></li>
+          <li class="nav-item"><a class="nav-link" data-unit="8" href="#" onclick="showUnit(8,this)">8:Stab</a></li>
+        </ul>
+        <div id="unit-panel">
+          <table class="table table-sm table-hover mb-0">
+            <thead><tr><th>Addr</th><th>Register</th><th>Raw</th><th>Value</th></tr></thead>
+            <tbody id="reg-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: Logs -->
+  <div class="col-xl-3 col-12">
+    <div class="card mb-3">
+      <div class="card-header">
+        <h5 class="mb-0" style="font-size:0.9rem">Field Devices</h5>
+      </div>
+      <div class="card-body p-2">
+        <table class="table table-sm mb-0" id="fd-table">
+          <thead><tr>
+            <th>Device</th><th>IP</th><th>Units</th>
+          </tr></thead>
+          <tbody id="fd-body"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-header d-flex justify-content-between">
+        <h5 class="mb-0" style="font-size:0.9rem">Auto-Poll Log</h5>
+        <button class="btn btn-sm btn-outline-secondary" onclick="clearPollLog()">Clear</button>
+      </div>
+      <div class="card-body p-0">
+        <div class="log-panel">
+          <table class="table table-sm mb-0"><thead><tr>
+            <th>Time</th><th>Unit</th><th>Label</th><th>Values</th>
+          </tr></thead><tbody id="poll-body"></tbody></table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /row -->
+</div><!-- /container -->
+
+<script>
+  const socket = io();
+  let regNames = {};
+  let allRegs = {};
+  let prevRegs = {};
+  let activeUnit = 1;
+
+  // Nav tab styling
+  document.querySelectorAll('#unitTabs .nav-link').forEach(a => {
+    a.style.color = '#8b949e';
+    a.style.borderColor = 'transparent';
+    a.style.background = 'transparent';
+  });
+  document.querySelector('#unitTabs .nav-link.active').style.color = '#58a6ff';
+
+  function showUnit(unit, el) {
+    activeUnit = unit;
+    document.querySelectorAll('#unitTabs .nav-link').forEach(a => {
+      a.classList.remove('active');
+      a.style.color = '#8b949e';
+    });
+    el.classList.add('active');
+    el.style.color = '#58a6ff';
+    renderUnit(unit);
+    return false;
+  }
+
+  function decodeReg(unit, addr, raw) {
+    const v = raw;
+    if (unit === 1) {
+      if (addr === 0 || addr === 1) return v + ' RPM';
+      if (addr === 2 || addr === 3) return (v/10).toFixed(1) + ' L/hr';
+      if (addr === 4 || addr === 5) return (v-50) + '°C';
+      if (addr === 6 || addr === 7) return (v/10).toFixed(1) + '%';
+      if (addr === 8 || addr === 9) return v + ' RPM';
+    }
+    if (unit === 2) {
+      if (addr === 0) { const d=v-180; return d===0?'0° Amidships':d>0?'+'+d+'° Stbd':d+'° Port'; }
+      if (addr === 1) return (v/10).toFixed(1) + ' kn';
+      if (addr === 2) return (v/10).toFixed(1) + '°T';
+      if (addr === 3) { const r=v-1800; return (r>=0?'+':'')+r+' °/min'; }
+      if (addr === 4) return (v/10).toFixed(1) + ' kn';
+      if (addr === 5) return v + '°';
+      if (addr === 6) return v + '° lat';
+      if (addr === 7) return (v/100).toFixed(2) + "' lat";
+      if (addr === 8) return v + '° lon';
+      if (addr === 9) return (v/100).toFixed(2) + "' lon";
+    }
+    if (unit === 3) {
+      if (addr <= 3) return (v/10).toFixed(1) + '%';
+      if (addr === 4) return v ? '⚠ FLOOD' : 'Normal';
+      if (addr === 5 || addr === 6) return ['Normal','PreAlarm','⚠ Alarm','Suppress'][Math.min(v,3)];
+      if (addr === 7 || addr === 8) return v ? '⚠ BILGE' : 'Normal';
+      if (addr === 9) return v ? '⚠ ALARM' : 'Normal';
+    }
+    if (unit === 4) {
+      if (addr <= 3) return v + ' kW';
+      if (addr === 4 || addr === 5) return (v/10).toFixed(0) + ' V';
+      if (addr === 6) return (v/10).toFixed(1) + ' Hz';
+      if (addr === 7) return v + ' kW';
+      if (addr === 8) return v ? 'Connected' : 'Off';
+      if (addr === 9) return v ? 'Running' : 'Off';
+    }
+    if (unit === 5) {
+      if (addr <= 5 || addr === 9) return (v/10).toFixed(1) + '°C';
+      if (addr === 6 || addr === 7 || addr === 8) return v ? 'Running' : 'Off';
+    }
+    if (unit === 6) {
+      if (addr <= 3) return ['Normal','PreAlarm','⚠ Alarm','Suppress'][Math.min(v,3)];
+      if (addr === 4 || addr === 5) return ['Normal','Armed','⚠ DSCHGD','FAULT'][Math.min(v,3)];
+      if (addr === 6) return v ? '⚠ ALARM' : 'Normal';
+      if (addr === 7 || addr === 8) return v ? '⚠ BILGE' : 'Normal';
+      if (addr === 9) return v + ' cnt';
+    }
+    if (unit === 7) {
+      if (addr <= 5) return (v/10).toFixed(1) + '%';
+      if (addr === 6 || addr === 7) return v + ' L/hr';
+      if (addr === 8) return ['HFO','MGO','Dual'][Math.min(v,2)];
+      if (addr === 9) return (v/10).toFixed(1) + ' t';
+    }
+    if (unit === 8) {
+      if (addr === 0 || addr === 1) return ((v-300)/10).toFixed(1) + '°';
+      if (addr === 2 || addr === 3) return ['Off','Standby','Active','Fault'][Math.min(v,3)];
+      if (addr === 4) return ((v-150)/10).toFixed(1) + '°';
+      if (addr === 5) return ((v-100)/10).toFixed(1) + '°';
+      if (addr === 6) return (v/100).toFixed(2) + ' m/s²';
+      if (addr === 7) return ['Off','Auto','Manual'][Math.min(v,2)];
+      if (addr === 8 || addr === 9) return (v/10).toFixed(1) + ' bar';
+    }
+    return '—';
+  }
+
+  function renderUnit(unit) {
+    const tbody = document.getElementById('reg-body');
+    tbody.innerHTML = '';
+    const unitRegs = allRegs[unit] || {};
+    const names = (regNames[unit] || {});
+    Object.entries(unitRegs).forEach(([addrStr, raw]) => {
+      const addr = parseInt(addrStr);
+      const name = names[addr] || `HR${addr}`;
+      const key = `${unit}-${addr}`;
+      const changed = prevRegs[key] !== undefined && prevRegs[key] !== raw;
+      prevRegs[key] = raw;
+      const row = document.createElement('tr');
+      const decoded = decodeReg(unit, addr, raw);
+      row.innerHTML = `
+        <td class="text-muted">${addr}</td>
+        <td style="font-size:0.8rem">${name}</td>
+        <td class="${changed ? 'val-changed' : ''}">${raw}</td>
+        <td style="font-size:0.8rem;color:#56d364">${decoded}</td>
+      `;
+      tbody.appendChild(row);
+    });
+  }
+
+  socket.on('connect', () => {
+    document.getElementById('dot').style.background = '#3fb950';
+    document.getElementById('conn-status').innerHTML = '<span class="status-dot" id="dot"></span> Live';
+  });
+  socket.on('disconnect', () => { document.getElementById('dot').style.background = '#f85149'; });
+
+  socket.on('registers', (data) => {
+    regNames = data.names || {};
+    const regs = data.registers || {};
+    for (let u = 1; u <= 8; u++) {
+      const unitData = regs[u] || regs[String(u)];
+      if (unitData) {
+        if (Array.isArray(unitData)) {
+          allRegs[u] = {};
+          unitData.forEach((v, i) => { allRegs[u][i] = v; });
+        } else {
+          allRegs[u] = unitData;
+        }
+      }
+    }
+    renderUnit(activeUnit);
+    document.getElementById('last-poll').textContent = 'Updated ' + new Date().toLocaleTimeString();
+  });
+
+  socket.on('fd_info', (data) => {
+    const tbody = document.getElementById('fd-body');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    const kaliMac = (data.kali_mac || '').toLowerCase();
+    (data.devices || []).forEach(d => {
+      const mac = d.mac || '—';
+      const spoofed = kaliMac && kaliMac !== 'unknown' && mac.toLowerCase() === kaliMac;
+      const macStyle = spoofed
+        ? 'font-size:0.75rem;font-family:"Courier New",monospace;color:#000;background:#d29922;font-weight:bold;border-top:none;border-radius:3px;padding:2px 4px'
+        : 'font-size:0.75rem;font-family:"Courier New",monospace;color:#8b949e;border-top:none';
+      const macLabel = spoofed ? `⚠ MAC: ${mac} (SPOOFED)` : `MAC: ${mac}`;
+      const tr1 = document.createElement('tr');
+      tr1.innerHTML = `
+        <td rowspan="2" style="vertical-align:middle"><strong>${d.label}</strong></td>
+        <td style="font-size:0.8rem">${d.ip}:${d.port}</td>
+        <td style="font-size:0.8rem">${d.units}</td>`;
+      const tr2 = document.createElement('tr');
+      tr2.innerHTML = `
+        <td colspan="2" style="${macStyle}" id="mac-${d.label}">${macLabel}</td>`;
+      tbody.appendChild(tr1);
+      tbody.appendChild(tr2);
+    });
+  });
+
+  socket.on('full_log', (data) => {
+    (data.poll_log || []).slice().reverse().forEach(e => appendPollEntry(e));
+    (data.cmd_log || []).slice().reverse().forEach(e => appendCmdEntry(e));
+  });
+  socket.on('poll_result', (data) => appendPollEntry(data.entry));
+  socket.on('cmd_result', (data) => appendCmdEntry(data.entry));
+
+  function appendPollEntry(e) {
+    const tbody = document.getElementById('poll-body');
+    const isWrite = e.type === 'write';
+    const row = document.createElement('tr');
+    const valStr = Array.isArray(e.values) ? e.values.join(',') : (e.values || '');
+    row.innerHTML = `
+      <td class="text-muted">${e.ts}</td>
+      <td><span class="unit-badge u${e.unit}">${e.unit}</span></td>
+      <td class="${isWrite ? 'type-write' : 'type-read'}" style="font-size:0.72rem">${e.label}</td>
+      <td style="font-size:0.72rem">${valStr}</td>
+    `;
+    tbody.insertBefore(row, tbody.firstChild);
+    while (tbody.rows.length > 80) tbody.deleteRow(tbody.rows.length - 1);
+  }
+
+  function appendCmdEntry(e) {
+    const tbody = document.getElementById('cmd-body');
+    const ok = e.result && e.result.ok;
+    const row = document.createElement('tr');
+    row.innerHTML = `
+      <td class="text-muted">${e.ts}</td>
+      <td style="font-size:0.72rem">${e.fc}</td>
+      <td><span class="unit-badge u${e.unit}">${e.unit}</span>/${e.addr}</td>
+      <td class="${ok ? 'result-ok' : 'result-err'}">${ok ? '✓' : '✗'}</td>
+    `;
+    tbody.insertBefore(row, tbody.firstChild);
+    while (tbody.rows.length > 30) tbody.deleteRow(tbody.rows.length - 1);
+  }
+
+  function clearCmdLog() { document.getElementById('cmd-body').innerHTML = ''; }
+  function clearPollLog() { document.getElementById('poll-body').innerHTML = ''; }
+
+  function updateForm() {
+    const fc = document.getElementById('fc').value;
+    const countGroup = document.getElementById('count-group');
+    const valueGroup = document.getElementById('value-group');
+    const valueLabel = document.getElementById('value-label');
+    const valueHint = document.getElementById('value-hint');
+    if (fc === 'read_holding' || fc === 'read_coils') {
+      countGroup.style.display = '';
+      valueGroup.style.display = 'none';
+    } else if (fc === 'write_single') {
+      countGroup.style.display = 'none';
+      valueGroup.style.display = '';
+      valueLabel.textContent = 'Value (0–65535)';
+      valueHint.textContent = 'Single integer';
+    } else if (fc === 'write_multiple') {
+      countGroup.style.display = 'none';
+      valueGroup.style.display = '';
+      valueLabel.textContent = 'Values (comma-separated)';
+      valueHint.textContent = 'e.g. 100, 200, 300';
+    }
+  }
+
+  document.getElementById('cmd-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fc = document.getElementById('fc').value;
+    const unit = document.getElementById('unit').value;
+    const addr = document.getElementById('addr').value;
+    const count = document.getElementById('count').value;
+    const rawValue = document.getElementById('value').value.trim();
+    const body = { fc, unit: parseInt(unit), addr: parseInt(addr) };
+    if (fc === 'read_holding' || fc === 'read_coils') { body.count = parseInt(count); }
+    else if (fc === 'write_single') { body.value = parseInt(rawValue); }
+    else if (fc === 'write_multiple') { body.values = rawValue; }
+    const box = document.getElementById('response-box');
+    box.className = '';
+    box.textContent = 'Sending…';
+    try {
+      const resp = await fetch('/api/command', {
+        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+      });
+      const data = await resp.json();
+      if (data.ok) {
+        box.className = 'ok';
+        box.textContent = data.values ? '✓  [' + data.values.join(', ') + ']' : '✓  Success';
+      } else {
+        box.className = 'err';
+        box.textContent = '✗  ' + (data.error || 'Unknown error');
+      }
+    } catch (err) {
+      box.className = 'err';
+      box.textContent = '✗  ' + err.message;
+    }
+  });
+
+  updateForm();
+
+  // ── Bridge Control Console ───────────────────────────────────────────────
+  let writeEnabled = true;
+  const manualUntil = { port: 0, stbd: 0, rudder: 0 };
+  const MANUAL_HOLD_MS = 5000; // suppress socket overwrites 5s after manual set
+
+  // Convert throttle % (0-100) → SVG y position (8=full, 192=stop)
+  function pctToY(pct) { return 192 - (pct / 100) * 184; }
+
+  function updateTelegraph(side, rawRPM) {
+    const pct = Math.min(100, Math.max(0, rawRPM / 1.44)); // 144 RPM = 100%
+    const y = pctToY(pct);
+    document.getElementById(side + '-indicator').setAttribute('cy', y);
+    document.getElementById(side + '-lever-line').setAttribute('y2', y);
+    document.getElementById(side + '-pct-svg').setAttribute('y', y + 4);
+    document.getElementById(side + '-pct-svg').textContent = Math.round(pct);
+    document.getElementById(side + '-pct-disp').textContent = rawRPM + ' RPM';
+    // Colour by zone
+    const color = pct >= 75 ? '#3fb950' : pct >= 50 ? '#56d364' : pct >= 25 ? '#d29922' : pct >= 5 ? '#e3b341' : '#f85149';
+    document.getElementById(side + '-indicator').setAttribute('fill', color);
+    document.getElementById(side + '-lever-line').setAttribute('stroke', color);
+  }
+
+  function updateRudder(raw) {
+    const deg = raw - 180; // negative=port, positive=stbd, range ≈ -35 to +35
+    // SVG needle: center arc at cx=110 cy=85, 0°=up. Map deg → SVG rotation.
+    // Full port (-35°) = -90° rotation, full stbd (+35°) = +90° rotation
+    const svgRot = (deg / 35) * 90;
+    document.getElementById('rudder-needle').setAttribute('transform', `rotate(${svgRot}, 110, 85)`);
+    const label = deg === 0 ? '0° Amidships'
+                : deg > 0  ? `+${deg}° Starboard`
+                :             `${deg}° Port`;
+    const color = deg === 0 ? '#8b949e' : deg > 0 ? '#3fb950' : '#f85149';
+    const el = document.getElementById('rudder-disp');
+    el.textContent = label;
+    el.style.color = color;
+  }
+
+  // Called on register updates — drives all bridge instruments
+  function updateBridge(regs) {
+    const u1 = regs[1] || regs['1'] || {};
+    const u2 = regs[2] || regs['2'] || {};
+    const portRPMcmd  = Array.isArray(u1) ? u1[0] : (u1[0] ?? 0);  // setpoint (cmd)
+    const stbdRPMcmd  = Array.isArray(u1) ? u1[1] : (u1[1] ?? 0);
+    const portRPMact  = Array.isArray(u1) ? u1[8] : (u1[8] ?? 0);  // shaft RPM (actual)
+    const stbdRPMact  = Array.isArray(u1) ? u1[9] : (u1[9] ?? 0);
+    const rudder   = Array.isArray(u2) ? u2[0] : (u2[0] ?? 180);
+    const speedRaw = Array.isArray(u2) ? u2[1] : (u2[1] ?? 0);
+    const hdgRaw   = Array.isArray(u2) ? u2[2] : (u2[2] ?? 0);
+    const rotRaw   = Array.isArray(u2) ? u2[3] : (u2[3] ?? 1800);
+
+    const _now = Date.now();
+    if (_now > manualUntil.port)   updateTelegraph('port', portRPMcmd);
+    if (_now > manualUntil.stbd)   updateTelegraph('stbd', stbdRPMcmd);
+    if (_now > manualUntil.rudder) updateRudder(rudder);
+    document.getElementById('nav-speed').textContent   = (speedRaw / 10).toFixed(1);
+    document.getElementById('nav-heading').textContent = (hdgRaw / 10).toFixed(1);
+    document.getElementById('nav-rot').textContent     = (rotRaw - 1800) >= 0
+      ? '+' + (rotRaw - 1800) : String(rotRaw - 1800);
+    document.getElementById('nav-port-rpm').textContent = portRPMact;
+    document.getElementById('nav-stbd-rpm').textContent = stbdRPMact;
+  }
+
+  // Live update of SVG while dragging (no Modbus write yet)
+  function leverMove(side, val) {
+    manualUntil[side] = Date.now() + MANUAL_HOLD_MS;
+    updateTelegraph(side, Math.round(val * 1.44)); // pct → raw RPM (max 144)
+  }
+
+  // Write to field device when user releases the lever
+  async function leverWrite(side, val) {
+    manualUntil[side] = Date.now() + MANUAL_HOLD_MS;
+    if (!writeEnabled) return;
+    const addr = side === 'port' ? 0 : 1;
+    await fetch('/api/command', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ fc: 'write_single', unit: 1, addr, value: Math.round(parseInt(val) * 1.44) })
+    });
+  }
+
+  function syncMove(val) {
+    const pct = parseInt(val);
+    const y = pctToY(pct);
+    document.getElementById('sync-indicator').setAttribute('cy', y);
+    document.getElementById('sync-lever-line').setAttribute('y2', y);
+    document.getElementById('sync-pct-svg').setAttribute('y', y + 4);
+    document.getElementById('sync-pct-svg').textContent = pct;
+    document.getElementById('sync-pct-disp').textContent = pct + '%';
+    manualUntil.port = manualUntil.stbd = Date.now() + MANUAL_HOLD_MS;
+    leverMove('port', pct);
+    leverMove('stbd', pct);
+  }
+
+  async function syncWrite(val) {
+    manualUntil.port = manualUntil.stbd = Date.now() + MANUAL_HOLD_MS;
+    if (!writeEnabled) return;
+    const rawVal = Math.round(parseInt(val) * 1.44);
+    await fetch('/api/command', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ fc: 'write_single', unit: 1, addr: 0, value: rawVal })
+    });
+    await fetch('/api/command', {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ fc: 'write_single', unit: 1, addr: 1, value: rawVal })
+    });
+  }
+
+  // SVG drag for telegraph levers (replaces deprecated slider-vertical)
+  (function() {
+    const SVG_H = 200, TRACK_TOP = 8, TRACK_BOT = 192;
+
+    function setupLeverDrag(side) {
+      const svg = document.getElementById('tele-' + side + '-svg');
+      let dragging = false, lastPct = 75;
+
+      function getY(e) {
+        const rect = svg.getBoundingClientRect();
+        const clientY = e.changedTouches ? e.changedTouches[0].clientY
+                      : e.touches       ? e.touches[0].clientY
+                      : e.clientY;
+        return (clientY - rect.top) * (SVG_H / rect.height);
+      }
+
+      function yToPct(y) {
+        const clamped = Math.max(TRACK_TOP, Math.min(TRACK_BOT, y));
+        return Math.round((1 - (clamped - TRACK_TOP) / (TRACK_BOT - TRACK_TOP)) * 100);
+      }
+
+      svg.addEventListener('mousedown', e => {
+        dragging = true; lastPct = yToPct(getY(e));
+        leverMove(side, lastPct); e.preventDefault();
+      });
+      svg.addEventListener('touchstart', e => {
+        dragging = true; lastPct = yToPct(getY(e));
+        leverMove(side, lastPct); e.preventDefault();
+      }, {passive: false});
+
+      document.addEventListener('mousemove', e => {
+        if (!dragging) return;
+        lastPct = yToPct(getY(e)); leverMove(side, lastPct);
+      });
+      document.addEventListener('touchmove', e => {
+        if (!dragging) return;
+        lastPct = yToPct(getY(e)); leverMove(side, lastPct); e.preventDefault();
+      }, {passive: false});
+
+      document.addEventListener('mouseup', () => {
+        if (!dragging) return; dragging = false; leverWrite(side, lastPct);
+      });
+      document.addEventListener('touchend', () => {
+        if (!dragging) return; dragging = false; leverWrite(side, lastPct);
+      });
+    }
+
+    setupLeverDrag('port');
+    setupLeverDrag('stbd');
+
+    // Sync telegraph drag — same mechanism but drives syncMove/syncWrite
+    (function() {
+      const svg = document.getElementById('tele-sync-svg');
+      let dragging = false, lastPct = 75;
+
+      function getY(e) {
+        const rect = svg.getBoundingClientRect();
+        const clientY = e.changedTouches ? e.changedTouches[0].clientY
+                      : e.touches       ? e.touches[0].clientY
+                      : e.clientY;
+        return (clientY - rect.top) * (SVG_H / rect.height);
+      }
+      function yToPct(y) {
+        const clamped = Math.max(TRACK_TOP, Math.min(TRACK_BOT, y));
+        return Math.round((1 - (clamped - TRACK_TOP) / (TRACK_BOT - TRACK_TOP)) * 100);
+      }
+
+      svg.addEventListener('mousedown', e => {
+        dragging = true; lastPct = yToPct(getY(e));
+        syncMove(lastPct); e.preventDefault();
+      });
+      svg.addEventListener('touchstart', e => {
+        dragging = true; lastPct = yToPct(getY(e));
+        syncMove(lastPct); e.preventDefault();
+      }, {passive: false});
+      document.addEventListener('mousemove', e => {
+        if (!dragging) return;
+        lastPct = yToPct(getY(e)); syncMove(lastPct);
+      });
+      document.addEventListener('touchmove', e => {
+        if (!dragging) return;
+        lastPct = yToPct(getY(e)); syncMove(lastPct); e.preventDefault();
+      }, {passive: false});
+      document.addEventListener('mouseup', () => {
+        if (!dragging) return; dragging = false; syncWrite(lastPct);
+      });
+      document.addEventListener('touchend', () => {
+        if (!dragging) return; dragging = false; syncWrite(lastPct);
+      });
+    })();
+
+    // Rudder drag — horizontal drag over arc maps to ±35°
+    // SVG viewBox="0 0 220 95", arc center=(110,85), radius=95
+    // x=15→-35° (port), x=205→+35° (stbd)
+    (function() {
+      const svg = document.getElementById('rudder-needle').closest('svg');
+      svg.style.cursor = 'ew-resize';
+      let dragging = false, lastRaw = 180;
+
+      function getAngle(e) {
+        const rect = svg.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX
+                      : e.changedTouches ? e.changedTouches[0].clientX
+                      : e.clientX;
+        const svgX = (clientX - rect.left) * (220 / rect.width);
+        return Math.max(-35, Math.min(35, Math.round((svgX - 110) / 95 * 35)));
+      }
+
+      svg.addEventListener('mousedown', e => {
+        dragging = true;
+        lastRaw = 180 + getAngle(e);
+        manualUntil.rudder = Date.now() + MANUAL_HOLD_MS;
+        updateRudder(lastRaw); e.preventDefault();
+      });
+      svg.addEventListener('touchstart', e => {
+        dragging = true;
+        lastRaw = 180 + getAngle(e);
+        manualUntil.rudder = Date.now() + MANUAL_HOLD_MS;
+        updateRudder(lastRaw); e.preventDefault();
+      }, {passive: false});
+
+      document.addEventListener('mousemove', e => {
+        if (!dragging) return;
+        lastRaw = 180 + getAngle(e);
+        manualUntil.rudder = Date.now() + MANUAL_HOLD_MS;
+        updateRudder(lastRaw);
+      });
+      document.addEventListener('touchmove', e => {
+        if (!dragging) return;
+        lastRaw = 180 + getAngle(e);
+        manualUntil.rudder = Date.now() + MANUAL_HOLD_MS;
+        updateRudder(lastRaw); e.preventDefault();
+      }, {passive: false});
+
+      document.addEventListener('mouseup', async () => {
+        if (!dragging) return; dragging = false;
+        manualUntil.rudder = Date.now() + MANUAL_HOLD_MS;
+        if (!writeEnabled) return;
+        await fetch('/api/command', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ fc: 'write_single', unit: 2, addr: 0, value: lastRaw })
+        });
+      });
+      document.addEventListener('touchend', async () => {
+        if (!dragging) return; dragging = false;
+        manualUntil.rudder = Date.now() + MANUAL_HOLD_MS;
+        if (!writeEnabled) return;
+        await fetch('/api/command', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ fc: 'write_single', unit: 2, addr: 0, value: lastRaw })
+        });
+      });
+    })();
+  })();
+
+  // Hook into existing registers event to drive bridge panel
+  socket.on('registers', (data) => { updateBridge(data.registers || {}); });
+</script>
+</body>
+</html>
